@@ -33,8 +33,8 @@ def read_config(config_path):
             paths.append(row["filepath"])
     return labels, paths
 
-def run_kmc(label, fasta_path, k, outdir, kmc_threads):
-    kmc_dir = os.path.join(outdir, f"kmc_{label}_k{k}")
+def run_kmc(label, fasta_path, k, middle_dir, kmc_threads):
+    kmc_dir = os.path.join(middle_dir, f"kmc_{label}_k{k}")
     Path(kmc_dir).mkdir(parents=True, exist_ok=True)
     out_prefix = os.path.join(kmc_dir, f"{label}_k{k}")
     tmp_dir = os.path.join(kmc_dir, "tmp")
@@ -45,14 +45,14 @@ def run_kmc(label, fasta_path, k, outdir, kmc_threads):
         subprocess.run(cmd, shell=True, check=True)
     return out_prefix
 
-def run_kmc_histogram(label, out_prefix, k, outdir):
-    hist_out = os.path.join(outdir, f"{label}_k{k}_hist.csv")
+def run_kmc_histogram(label, out_prefix, k, middle_dir):
+    hist_out = os.path.join(middle_dir, f"{label}_k{k}_hist.csv")
     if not os.path.exists(hist_out):
         subprocess.run(["./cpp/kmc_histogram", out_prefix, hist_out], check=True)
     return hist_out
 
-def run_sourmash_sketch(label, fasta_path, k, theta, outdir):
-    sketch_path = os.path.join(outdir, f"{label}_k{k}_sig.sig")
+def run_sourmash_sketch(label, fasta_path, k, theta, middle_dir):
+    sketch_path = os.path.join(middle_dir, f"{label}_k{k}_sig.sig")
     if not os.path.exists(sketch_path):
         scaled = int(1 / theta)
         subprocess.run(["sourmash", "sketch", "dna", "-p", f"k={k},scaled={scaled}", "-o", sketch_path, fasta_path], check=True)
@@ -98,8 +98,8 @@ def parse_histogram_csv(path):
                 hist[count] = num_kmers
     return hist
 
-def compute_distance(labelA, sigA, histA_path, labelB, sigB, histB_path, k, theta, outdir):
-    out_prefix = os.path.join(outdir, f"{labelA}___{labelB}")
+def compute_distance(labelA, sigA, histA_path, labelB, sigB, histB_path, k, theta, middle_dir):
+    out_prefix = os.path.join(middle_dir, f"{labelA}___{labelB}")
     out_file = out_prefix + ".csv"
     if os.path.exists(out_file):
         return out_file
@@ -126,14 +126,15 @@ def compute_distance(labelA, sigA, histA_path, labelB, sigB, histB_path, k, thet
         f.write(f"label1,label2,distance\n{labelA},{labelB},{r}\n")
     return out_file
 
-def cleanup_middle_files(outdir):
-    tmp_dir = os.path.join(outdir, "tmp")
-    if os.path.exists(tmp_dir):
-        shutil.rmtree(tmp_dir)
+def cleanup_middle_files(middle_dir):
+    """Clean up all intermediate files in the middle directory"""
+    if os.path.exists(middle_dir):
+        print(f"[INFO] Cleaning up intermediate files in {middle_dir}")
+        shutil.rmtree(middle_dir)
 
 def build_nj_tree(labels, distances, out_file):
     """
-    Build NJ tree, usingDistanceMatrix API
+    Build NJ tree, using DistanceMatrix API
     """
     n = len(labels)
     
@@ -150,8 +151,6 @@ def build_nj_tree(labels, distances, out_file):
                 dist = distances.get((label_i, label_j), distances.get((label_j, label_i), 0.0))
                 full_matrix[i][j] = dist
     
-    # 
-
     dm = DistanceMatrix(names=labels)
     for i in range(n):
         for j in range(i):
@@ -168,7 +167,13 @@ def run_kmc_histogram_wrapper(args):
 
 def main():
     args = parse_args()
+    
+    # Create output directory for final results
     Path(args.outdir).mkdir(parents=True, exist_ok=True)
+    
+    # Create middle directory for intermediate files
+    middle_dir = "./middle_results"
+    Path(middle_dir).mkdir(parents=True, exist_ok=True)
 
     labels, fasta_paths = read_config(args.config)
 
@@ -180,8 +185,8 @@ def main():
     with ProcessPoolExecutor(max_workers=args.cores) as executor:
         futures = []
         for i, (label, path) in enumerate(zip(labels, fasta_paths)):
-            futures.append((i, 'kmc', executor.submit(run_kmc, label, path, args.k, args.outdir, args.kmc_threads)))
-            futures.append((i, 'sour', executor.submit(run_sourmash_sketch, label, path, args.k, args.theta, args.outdir)))
+            futures.append((i, 'kmc', executor.submit(run_kmc, label, path, args.k, middle_dir, args.kmc_threads)))
+            futures.append((i, 'sour', executor.submit(run_sourmash_sketch, label, path, args.k, args.theta, middle_dir)))
 
         for i, task_type, fut in futures:
             result = fut.result()
@@ -191,15 +196,10 @@ def main():
                 sigs[i] = result
 
     print("[Step 1.2] Parsing KMC Histograms...")
-    with ProcessPoolExecutor(max_workers= args.cores) as executor:
-        arg_list = [(label, out_prefix, args.k, args.outdir) for label, out_prefix in zip(labels, kmc_outs)]
+    with ProcessPoolExecutor(max_workers=args.cores) as executor:
+        arg_list = [(label, out_prefix, args.k, middle_dir) for label, out_prefix in zip(labels, kmc_outs)]
         hists = list(executor.map(run_kmc_histogram_wrapper, arg_list))
-    # hists = []
-    # for label, out_prefix in zip(labels, kmc_outs):
-    #     hist_out = os.path.join(args.outdir, f"{label}_k{args.k}_hist.csv")
-    #     if not os.path.exists(hist_out):
-    #         subprocess.run(["./cpp/kmc_histogram", out_prefix, hist_out], check=True)
-    #     hists.append(hist_out)
+
     print("[Step 2] Computing pairwise distances...")
     label_map = {l: (sig, hist) for l, sig, hist in zip(labels, sigs, hists)}
     if args.mode == "half":
@@ -213,7 +213,7 @@ def main():
         for A, B in pairs:
             futures.append(executor.submit(compute_distance, A, label_map[A][0], label_map[A][1],
                                                         B, label_map[B][0], label_map[B][1],
-                                                        args.k, args.theta, args.outdir))
+                                                        args.k, args.theta, middle_dir))
         for f in futures:
             path = f.result()
             if path:
@@ -224,6 +224,8 @@ def main():
                     distances[(A, B)] = val
 
     print("[Step 3] Building NJ Tree...")
+    
+    # Save pairwise distances to final output directory
     dist_file = os.path.join(args.outdir, "pairwise_distances.csv")
     with open(dist_file, 'w') as f:
         f.write("label1,label2,distance\n")
@@ -231,8 +233,8 @@ def main():
             f.write(f"{A},{B},{val}\n")
     print(f"Pairwise distances written to {dist_file}")
 
+    # Save NJ tree to final output directory
     tree_path = os.path.join(args.outdir, "nj_tree.nwk")
-
     unique_distances = {}
     for (A, B), val in distances.items():
         key = tuple(sorted([A, B]))
@@ -242,8 +244,11 @@ def main():
     tree_distances = {(A, B): val for (A, B), val in unique_distances.items()}
     build_nj_tree(labels, tree_distances, tree_path)
 
+    # Clean up intermediate files if requested
     if args.cleanup:
-        cleanup_middle_files(args.outdir)
+        cleanup_middle_files(middle_dir)
+    else:
+        print(f"[INFO] Intermediate files preserved in {middle_dir}")
 
 if __name__ == "__main__":
     main()
