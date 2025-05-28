@@ -4,24 +4,36 @@ This tool efficiently estimates phylogenetic distances and constructs a Neighbor
 
 ## Installation
 
-We recommend using Conda and `requirement.txt` to set up the environment:
+### Git Clone with Submodules
+
+```bash 
+- Method 1: Clone with submodules in one step (recommended) 
+git clone --recurse-submodules https://github.com/your-username/your-repo 
+- Method 2: Clone first, then initialize submodules 
+git clone https://github.com/your-username/your-repo 
+cd your-repo 
+git submodule update --init --recursive
+```
+
+### Install required packages using Conda
+
+We recommend using Conda to set up the environment:
+
+
+Install all the packages based on `requirements.txt`
 
 ```bash
 conda create -n <env_name> python=3.10 --file requirements.txt -c conda-forge -c bioconda -y
 conda activate <env_name>
 ```
 
-### Dependencies
+### Compile `kmc_histogram.cpp`
 
-- **KMC**
-- **sourmash**
-- **BioPython**
-- **scipy**
-- **numpy**
+```bash
+cd ./cpp/
+make
+```
 
-### Compile KMC Histogram Tool
-
-Ensure you have the compiled `./cpp/kmc_histogram` binary in your project directory.
 
 ## Quick Start
 
