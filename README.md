@@ -6,10 +6,14 @@ This tool efficiently estimates phylogenetic distances and constructs a Neighbor
 
 ### Git Clone with Submodules
 
-```bash 
 - Method 1: Clone with submodules in one step (recommended) 
+
+```bash 
 git clone --recurse-submodules git@github.com:Wu-Haonan/Repeat-Aware_phylogenetic_distance_estimator.git
+```
+
 - Method 2: Clone first, then initialize submodules 
+```bash
 git clone git@github.com:Wu-Haonan/Repeat-Aware_phylogenetic_distance_estimator.git
 cd Repeat-Aware_phylogenetic_distance_estimator 
 git submodule update --init --recursive
