@@ -12,6 +12,29 @@ from sourmash import load_file_as_signatures
 from scipy.optimize import brentq
 import shutil
 
+def get_script_dir():
+    """Get the directory where this script is located"""
+    return os.path.dirname(os.path.abspath(__file__))
+
+def get_cpp_executable():
+    """Get the absolute path to the cpp histogram executable"""
+    script_dir = get_script_dir()
+    cpp_path = os.path.join(script_dir, "cpp", "kmc_histogram")
+    
+    if not os.path.isfile(cpp_path):
+        raise FileNotFoundError(
+            f"kmc_histogram executable not found at: {cpp_path}\n"
+            f"Please ensure the cpp/kmc_histogram is compiled in the same directory as this script."
+        )
+    
+    if not os.access(cpp_path, os.X_OK):
+        raise PermissionError(
+            f"kmc_histogram executable found but not executable: {cpp_path}\n"
+            f"Please check file permissions."
+        )
+    
+    return cpp_path
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Repeat-Aware Mutation Distance Estimator")
     parser.add_argument("--config", required=True, help="CSV with columns: label,filepath")
@@ -45,10 +68,11 @@ def run_kmc(label, fasta_path, k, middle_dir, kmc_threads):
         subprocess.run(cmd, shell=True, check=True)
     return out_prefix
 
-def run_kmc_histogram(label, out_prefix, k, middle_dir):
+def run_kmc_histogram(label, out_prefix, k, middle_dir, cpp_exec_path):
     hist_out = os.path.join(middle_dir, f"{label}_k{k}_hist.csv")
     if not os.path.exists(hist_out):
-        subprocess.run(["./cpp/kmc_histogram", out_prefix, hist_out], check=True)
+        # Use the provided cpp executable path
+        subprocess.run([cpp_exec_path, out_prefix, hist_out], check=True)
     return hist_out
 
 def run_sourmash_sketch(label, fasta_path, k, theta, middle_dir):
@@ -89,7 +113,7 @@ def parse_histogram_csv(path):
     hist = {}
     with open(path, 'r') as f:
         reader = csv.reader(f)
-        next(reader)  # jump head
+        next(reader)  # skip header
         
         for row in reader:
             if len(row) >= 2:
@@ -145,7 +169,7 @@ def build_nj_tree(labels, distances, out_file):
     for i in range(n):
         for j in range(n):
             if i == j:
-                full_matrix[i][j] = 0.0  # set diag as 0
+                full_matrix[i][j] = 0.0  # set diagonal as 0
             else:
                 label_i, label_j = labels[i], labels[j]
                 dist = distances.get((label_i, label_j), distances.get((label_j, label_i), 0.0))
@@ -163,10 +187,15 @@ def build_nj_tree(labels, distances, out_file):
     print(f"[INFO] NJ tree successfully written to {out_file}")
 
 def run_kmc_histogram_wrapper(args):
+    """Wrapper function for multiprocessing"""
     return run_kmc_histogram(*args)
 
 def main():
     args = parse_args()
+    
+    # Get cpp executable path automatically
+    cpp_exec_path = get_cpp_executable()
+    print(f"[INFO] Using cpp executable: {cpp_exec_path}")
     
     # Create output directory for final results
     Path(args.outdir).mkdir(parents=True, exist_ok=True)
@@ -197,7 +226,8 @@ def main():
 
     print("[Step 1.2] Parsing KMC Histograms...")
     with ProcessPoolExecutor(max_workers=args.cores) as executor:
-        arg_list = [(label, out_prefix, args.k, middle_dir) for label, out_prefix in zip(labels, kmc_outs)]
+        # Pass cpp_exec_path to each histogram computation
+        arg_list = [(label, out_prefix, args.k, middle_dir, cpp_exec_path) for label, out_prefix in zip(labels, kmc_outs)]
         hists = list(executor.map(run_kmc_histogram_wrapper, arg_list))
 
     print("[Step 2] Computing pairwise distances...")
