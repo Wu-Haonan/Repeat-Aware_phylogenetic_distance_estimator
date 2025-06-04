@@ -1,0 +1,3 @@
+label,filepath
+origin,./example_data/origin_seq.fasta
+mutated,./example_data/mutated_seq.fasta
