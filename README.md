@@ -155,3 +155,43 @@ The tool supports multi-level parallelization:
 4. **Distance Calculation**: Estimates mutation rates using repeat-aware methods
 5. **Tree Construction**: Builds neighbor-joining phylogenetic tree using BioPython
 
+## Citation
+
+If you use our tool, pleast cite:
+
+```bib
+@article {Wu2025.06.19.660607,
+	author = {Wu, Haonan and Blanca, Antonio and Medvedev, Paul},
+	title = {A k-mer-based estimator of the substitution rate between repetitive sequences},
+	elocation-id = {2025.06.19.660607},
+	year = {2025},
+	doi = {10.1101/2025.06.19.660607},
+	publisher = {Cold Spring Harbor Laboratory},
+	URL = {https://www.biorxiv.org/content/early/2025/06/25/2025.06.19.660607},
+	eprint = {https://www.biorxiv.org/content/early/2025/06/25/2025.06.19.660607.full.pdf},
+	journal = {bioRxiv}
+}
+```
+
+Or 
+
+```bib
+@InProceedings{wu_et_al:LIPIcs.WABI.2025.20,
+  author =	{Wu, Haonan and Blanca, Antonio and Medvedev, Paul},
+  title =	{{A k-mer-Based Estimator of the Substitution Rate Between Repetitive Sequences}},
+  booktitle =	{25th International Conference on Algorithms for Bioinformatics (WABI 2025)},
+  pages =	{20:1--20:20},
+  series =	{Leibniz International Proceedings in Informatics (LIPIcs)},
+  ISBN =	{978-3-95977-386-7},
+  ISSN =	{1868-8969},
+  year =	{2025},
+  volume =	{344},
+  editor =	{Brejov\'{a}, Bro\v{n}a and Patro, Rob},
+  publisher =	{Schloss Dagstuhl -- Leibniz-Zentrum f{\"u}r Informatik},
+  address =	{Dagstuhl, Germany},
+  URL =		{https://drops.dagstuhl.de/entities/document/10.4230/LIPIcs.WABI.2025.20},
+  URN =		{urn:nbn:de:0030-drops-239465},
+  doi =		{10.4230/LIPIcs.WABI.2025.20},
+  annote =	{Keywords: k-mers, sketching, mutation rates}
+}
+```
