@@ -11,6 +11,7 @@ from Bio import Phylo
 from sourmash import load_file_as_signatures
 from scipy.optimize import brentq
 import shutil
+import math
 
 def get_script_dir():
     """Get the directory where this script is located"""
@@ -41,10 +42,14 @@ def parse_args():
     parser.add_argument("--mode", choices=["half", "all"], default="half", help="Whether to compute one-direction or both")
     parser.add_argument("--k", type=int, default=31, help="k-mer size")
     parser.add_argument("--theta", type=float, default=0.01, help="FracMinHash theta")
+    parser.add_argument("--JC", type=bool, default=0, help="If use Jukes-Cantor distance")
     parser.add_argument("--cores", type=int, default=4, help="Number of CPU cores to use (processes)")
     parser.add_argument("--kmc-threads", type=int, default=1, help="Threads per KMC task (default: 1)")
     parser.add_argument("--outdir", default="results", help="Output directory")
+    parser.add_argument("--middle-dir", default="middle_results", help="Directory for intermediate files")
     parser.add_argument("--cleanup", action="store_true", help="Clean intermediate files")
+    parser.add_argument("--tree-method", choices=["nj", "upgma", "both"], default="nj", 
+                       help="Tree construction method: nj (Neighbor Joining), upgma (UPGMA), or both")
     return parser.parse_args()
 
 def read_config(config_path):
@@ -122,7 +127,7 @@ def parse_histogram_csv(path):
                 hist[count] = num_kmers
     return hist
 
-def compute_distance(labelA, sigA, histA_path, labelB, sigB, histB_path, k, theta, middle_dir):
+def compute_distance(labelA, sigA, histA_path, labelB, sigB, histB_path, k, theta, middle_dir, JCbool):
     out_prefix = os.path.join(middle_dir, f"{labelA}___{labelB}")
     out_file = out_prefix + ".csv"
     if os.path.exists(out_file):
@@ -144,10 +149,18 @@ def compute_distance(labelA, sigA, histA_path, labelB, sigB, histB_path, k, thet
     else:
         q = solve_histogram_equation(histA, I, total_kmers)
         r = 1 - (1 - q) ** (1/k)
-
-    print(f"[RESULT] {labelA} , {labelB} Estimated r : {r}")
-    with open(out_file, 'w') as f:
-        f.write(f"label1,label2,distance\n{labelA},{labelB},{r}\n")
+    if (JCbool):
+        JC = -0.75 * math.log(1 - (4*r/3))
+        #print(f"[RESULT] {labelA} , {labelB} Estimated r : {r}")
+        print(f"[RESULT] {labelA} , {labelB} Estimated Jukes-Cantor distance : {JC}")
+        with open(out_file, 'w') as f:
+            #f.write(f"label1,label2,distance\n{labelA},{labelB},{r}\n")
+            f.write(f"label1,label2,distance\n{labelA},{labelB},{JC}\n")
+    else:
+        print(f"[RESULT] {labelA} , {labelB} Estimated r : {r}")
+        with open(out_file, 'w') as f:
+            #f.write(f"label1,label2,distance\n{labelA},{labelB},{r}\n")
+            f.write(f"label1,label2,distance\n{labelA},{labelB},{r}\n")
     return out_file
 
 def cleanup_middle_files(middle_dir):
@@ -156,13 +169,14 @@ def cleanup_middle_files(middle_dir):
         print(f"[INFO] Cleaning up intermediate files in {middle_dir}")
         shutil.rmtree(middle_dir)
 
-def build_nj_tree(labels, distances, out_file):
+def build_tree(labels, distances, out_file, method="nj"):
     """
-    Build NJ tree, using DistanceMatrix API
+    Build phylogenetic tree using specified method (NJ or UPGMA)
     """
     n = len(labels)
     
-    print(f"[INFO] Building NJ tree for {n} species")
+    method_name = "NJ" if method == "nj" else "UPGMA"
+    print(f"[INFO] Building {method_name} tree for {n} species")
     
     full_matrix = np.zeros((n, n))
     
@@ -181,10 +195,16 @@ def build_nj_tree(labels, distances, out_file):
             dm[labels[i], labels[j]] = full_matrix[i][j]
     
     constructor = DistanceTreeConstructor()
-    tree = constructor.nj(dm)
+    
+    if method == "nj":
+        tree = constructor.nj(dm)
+    elif method == "upgma":
+        tree = constructor.upgma(dm)
+    else:
+        raise ValueError(f"Unknown tree construction method: {method}")
     
     Phylo.write(tree, out_file, "newick")
-    print(f"[INFO] NJ tree successfully written to {out_file}")
+    print(f"[INFO] {method_name} tree successfully written to {out_file}")
 
 def run_kmc_histogram_wrapper(args):
     """Wrapper function for multiprocessing"""
@@ -200,9 +220,10 @@ def main():
     # Create output directory for final results
     Path(args.outdir).mkdir(parents=True, exist_ok=True)
     
-    # Create middle directory for intermediate files
-    middle_dir = "./middle_results"
+    # Create middle directory for intermediate files using the specified path
+    middle_dir = args.middle_dir
     Path(middle_dir).mkdir(parents=True, exist_ok=True)
+    print(f"[INFO] Using intermediate files directory: {middle_dir}")
 
     labels, fasta_paths = read_config(args.config)
 
@@ -243,7 +264,7 @@ def main():
         for A, B in pairs:
             futures.append(executor.submit(compute_distance, A, label_map[A][0], label_map[A][1],
                                                         B, label_map[B][0], label_map[B][1],
-                                                        args.k, args.theta, middle_dir))
+                                                        args.k, args.theta, middle_dir,args.JC))
         for f in futures:
             path = f.result()
             if path:
@@ -253,7 +274,7 @@ def main():
                     A, B, val = row[0], row[1], float(row[2])
                     distances[(A, B)] = val
 
-    print("[Step 3] Building NJ Tree...")
+    print("[Step 3] Building Phylogenetic Tree(s)...")
     
     # Save pairwise distances to final output directory
     dist_file = os.path.join(args.outdir, "pairwise_distances.csv")
@@ -263,8 +284,7 @@ def main():
             f.write(f"{A},{B},{val}\n")
     print(f"Pairwise distances written to {dist_file}")
 
-    # Save NJ tree to final output directory
-    tree_path = os.path.join(args.outdir, "nj_tree.nwk")
+    # Prepare distance data for tree construction
     unique_distances = {}
     for (A, B), val in distances.items():
         key = tuple(sorted([A, B]))
@@ -272,7 +292,20 @@ def main():
             unique_distances[key] = val
     
     tree_distances = {(A, B): val for (A, B), val in unique_distances.items()}
-    build_nj_tree(labels, tree_distances, tree_path)
+
+    # Build tree(s) based on selected method
+    if args.tree_method == "nj":
+        tree_path = os.path.join(args.outdir, "nj_tree.nwk")
+        build_tree(labels, tree_distances, tree_path, "nj")
+    elif args.tree_method == "upgma":
+        tree_path = os.path.join(args.outdir, "upgma_tree.nwk")
+        build_tree(labels, tree_distances, tree_path, "upgma")
+    elif args.tree_method == "both":
+        # Build both NJ and UPGMA trees
+        nj_tree_path = os.path.join(args.outdir, "nj_tree.nwk")
+        upgma_tree_path = os.path.join(args.outdir, "upgma_tree.nwk")
+        build_tree(labels, tree_distances, nj_tree_path, "nj")
+        build_tree(labels, tree_distances, upgma_tree_path, "upgma")
 
     # Clean up intermediate files if requested
     if args.cleanup:
